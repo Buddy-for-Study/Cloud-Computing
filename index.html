@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cloud Flashcards — EN / HI / MR</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Improved 3D flip and responsive card sizing */
+      .card-3d{ perspective:1200px; }
+      .card-inner{ width:100%; height:100%; transition: transform 0.62s cubic-bezier(.2,.9,.3,1); transform-style:preserve-3d; position:relative; }
+      .is-flipped .card-inner{ transform: rotateY(180deg); }
+      .card-face{ backface-visibility:hidden; -webkit-backface-visibility:hidden; position:absolute; inset:0; padding:1rem; }
+      .card-front{ transform: rotateY(0deg); }
+      .card-back{ transform: rotateY(180deg); }
+      /* subtle focus outline for accessibility */
+      .focus-outline:focus{ outline:2px dashed rgba(96,165,250,0.6); outline-offset:3px; }
+      /* animated gradient background */
+      .bg-animated{ background: linear-gradient(90deg,#7c3aed,#06b6d4,#f97316); background-size:300% 300%; animation:grad 8s ease infinite; }
+      @keyframes grad{ 0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%} }
+      /* make scrollbars thinner inside answers */
+      .card-scroll{ scrollbar-width: thin; max-height:10rem; overflow:auto; }
+      /* speaking state */
+      .speaking{ box-shadow:0 12px 40px rgba(99,102,241,0.18); transform:translateY(-4px) scale(1.01); }
+      /* responsive tweaks */
+      @media (max-width:640px){ .card-inner{ min-height:13rem } }
+    </style>
+  </head>
+  <body class="min-h-screen bg-gradient-to-b from-sky-50 to-indigo-50 p-4 sm:p-6">
+    <div class="max-w-6xl mx-auto">
+      <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-full bg-animated flex items-center justify-center shadow-lg text-white font-bold">CF</div>
+          <div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-800">Cloud Flashcards</h1>
+            <p class="text-sm text-slate-600 mt-0.5">Important Q&A — English / हिन्दी / मराठी • Simple answers for quick learning</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label for="langSelect" class="text-sm text-slate-700">Language</label>
+          <select id="langSelect" class="rounded-lg px-3 py-2 text-sm bg-white border shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            <option value="en" selected>English</option>
+            <option value="hi">हिन्दी</option>
+            <option value="mr">मराठी</option>
+          </select>
+
+          <button id="voicePref" title="Choose voice" class="px-3 py-2 bg-white border rounded-lg shadow-sm text-sm">Voice</button>
+
+          <button id="stopAll" class="px-3 py-2 bg-red-500 text-white rounded-lg text-sm shadow-sm">Stop</button>
+        </div>
+      </header>
+
+      <p id="hint" class="text-sm text-slate-600 mb-4">Tap a card to flip. Use the 🔊 Play button to listen (soft, slower voice). If Marathi audio is short, try Voice → select a Marathi/Hindi voice.</p>
+
+      <main>
+        <div id="cardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+      </main>
+
+      <footer class="mt-8 text-center text-sm text-slate-600">Designed for quick revision — tap, listen, repeat.
+      <p>    &copy; Buddy-for-Study</p>
+      </footer>
+    </div>
+
+    <!-- Voice selection modal (hidden) -->
+    <div id="voiceModal" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
+      <div class="bg-white rounded-lg shadow-lg w-11/12 sm:w-96 p-4">
+        <h3 class="font-semibold mb-2">Select preferred voice</h3>
+        <div class="text-sm text-slate-600 mb-3">Pick a voice to use for speech. Choose one per language if available.</div>
+        <div id="voiceList" class="max-h-56 overflow-auto space-y-2"></div>
+        <div class="mt-4 flex justify-end gap-2">
+          <button id="closeVoiceModal" class="px-3 py-1 rounded bg-gray-100">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Simplified answers for beginners + improved audio handling
+      const rawCards = [
+        {
+          en: { q: 'What is cloud computing?', a: 'Cloud computing gives you servers, storage and apps over the internet. You use them when needed and pay for what you use. It is more flexible and scalable than owning your own servers.' },
+          hi: { q: 'क्‍लाउड कंप्यूटिंग क्या है?', a: 'क्लाउड कंप्यूटिंग में इंटरनेट के ज़रिए सर्वर, स्टोरेज और ऐप्स मिलते हैं। आप आवश्यकता पर इन्हें उपयोग करते हैं और उसी के अनुसार भुगतान करते हैं। यह अपने सर्वरों से ज़्यादा लचीला है।' },
+          mr: { q: 'क्लाउड कंप्यूटिंग म्हणजे काय?', a: 'क्लाउडमध्ये इंटरनेटवरून सर्व्हर, स्टोरेज आणि अ‍ॅप मिळतात. गरजेनुसार वापरता येतात आणि वापरानुसार पैसे द्यावे लागतात. हे आपले स्वतःचे सर्व्हर ठेवण्यापेक्षा अधिक लवचिक आहे.' }
+        },
+        {
+          en: { q: 'Main advantages and disadvantages of cloud?', a: 'Advantages: cheaper setup, easy to scale, access from anywhere, automatic updates. Disadvantages: needs internet, possible security concerns, and dependency on provider.' },
+          hi: { q: 'क्लाउड के फायदे और नुकसान क्या हैं?', a: 'फायदे: सस्ता सेटअप, स्केल करना आसान, कहीं से भी पहुँच, ऑटो अपडेट। नुकसान: इंटरनेट चाहिए, सुरक्षा चिंताएँ और प्रदाता पर निर्भरता।' },
+          mr: { q: 'क्लाउडचे फायदे आणि तोटे काय आहेत?', a: 'फायदे: कमी खर्च, सहज स्केलिंग, कुठूनही ऍक्सेस, ऑटो अपडेट्स. तोटे: इंटरनेट लागते, सुरक्षा चिंता, प्रदात्यावर अवलंबित्व.' }
+        },
+        {
+          en: { q: 'How did cloud computing evolve?', a: 'It started from mainframes and time‑sharing, then client‑server models, the internet, virtualization, and finally commercial cloud services like AWS. Each step added sharing and remote access.' },
+          hi: { q: 'क्लाउड कैसे विकसित हुआ?', a: 'पहले मेनफ्रेम और टाइम‑शेयरिंग था, फिर क्लाइंट‑सर्वर, इंटरनेट और वर्चुअलाइज़ेशन आया, और बाद में AWS जैसे क्लाउड सर्विसे आईं। हर चरण में साझा करने और दूर से पहुँचने की सुविधा बढ़ी।' },
+          mr: { q: 'क्लाउड कसे विकसित झाले?', a: 'सुरुवात मेनफ्रेम व टाइम‑शेअरिंगपासून झाली, नंतर क्लायंट‑सर्व्हर, इंटरनेट, व्हर्च्युअलायझेशन आणि शेवटी AWS सारख्या क्लाउड सेवा. प्रत्येक टप्प्यात शेअरिंग व रिमोट ऍक्सेस वाढले.' }
+        },
+        {
+          en: { q: 'Types of cloud: Public, Private, Hybrid, Community, Multi‑Cloud?', a: 'Public: anyone can use (low cost). Private: only one organization (more secure). Hybrid: mix of both. Community: shared by similar groups. Multi‑Cloud: use many providers to avoid lock‑in.' },
+          hi: { q: 'क्लाउड के प्रकार कौन‑से हैं?', a: 'पब्लिक: सब उपयोग कर सकते हैं (कम लागत). प्राइवेट: केवल एक संगठन के लिए (ज़्यादा सुरक्षित). हाइब्रिड: दोनों का मिश्रण. कम्युनिटी: मिलते‑जुलते समूह साझा करते हैं. मल्टी‑क्लाउड: कई प्रदाताओं का उपयोग।' },
+          mr: { q: 'क्लाउडचे प्रकार कोणते?', a: 'पब्लिक: सर्वांसाठी (कमी खर्च). प्रायव्हेट: एका संघटनेसाठी (जास्त सुरक्षित). हायब्रिड: दोन्हींचे मिश्रण. कम्युनिटी: सारख्याच गटांनी साझा. मल्टि‑क्लाउड: अनेक पुरवठादार वापरणे.' }
+        },
+        {
+          en: { q: 'Explain IaaS, PaaS, SaaS (short).', a: 'IaaS: virtual machines and storage you manage. PaaS: platform to build apps (provider manages infra). SaaS: apps you use directly (like Gmail).' },
+          hi: { q: 'IaaS, PaaS, SaaS क्या हैं?', a: 'IaaS: वर्चुअल मशीन और स्टोरेज जो आप मैनेज करते हैं। PaaS: ऐप बनाने का प्लेटफ़ॉर्म (प्रदाता इंफ्रा संभालता है)। SaaS: तैयार ऐप्स जो आप सीधे इस्तेमाल करते हैं (जैसे Gmail)।' },
+          mr: { q: 'IaaS, PaaS, SaaS म्हणजे काय?', a: 'IaaS: तुम्ही वापरत असलेली व्हर्च्युअल मशीन व स्टोरेज. PaaS: अॅप बनवण्यासाठी प्लॅटफॉर्म (प्रदाता इंफ्रा सांभाळतो). SaaS: तुम्ही थेट वापरत असलेली अॅप्स (उदा. Gmail).' }
+        },
+        {
+          en: { q: 'What is virtualization?', a: 'Virtualization makes virtual machines or virtual resources from one physical machine. It helps run many systems on one server and isolate them.' },
+          hi: { q: 'वर्चुअलाइज़ेशन क्या है?', a: 'वर्चुअलाइज़ेशन एक भौतिक मशीन से कई आभासी मशीनें बनाना है। इससे एक सर्वर पर कई सिस्टम चलाए जा सकते हैं और अलग रखे जा सकते हैं।' },
+          mr: { q: 'व्हर्च्युअलायझेशन म्हणजे काय?', a: 'व्हर्च्युअलायझेशन म्हणजे एका भौतिक मशीनवरून अनेक आभासी मशीन तयार करणे. यामुळे एका सर्व्हरवर अनेक सिस्टीम चालतात आणि वेगळे ठेवता येतात.' }
+        },
+        {
+          en: { q: 'What is a hypervisor?', a: 'A hypervisor is software that creates and runs virtual machines. Type 1 runs on hardware, Type 2 runs on an operating system.' },
+          hi: { q: 'हाइपरवाइज़र क्या है?', a: 'हाइपरवाइज़र वह सॉफ्टवेयर है जो वर्चुअल मशीन बनाता और चलाता है। टाइप‑1 हार्डवेयर पर चलता है; टाइप‑2 OS पर चलता है।' },
+          mr: { q: 'हायपरवायझर म्हणजे काय?', a: 'हायपरवायझर हे सॉफ्टवेअर आहे जे व्हर्च्युअल मशीन तयार व चालवते. टाइप‑1 हार्डवेअरवर चालते; टाइप‑2 OS वर चालते.' }
+        },
+        {
+          en: { q: 'Why SAN (Storage Area Network) is useful in cloud?', a: 'SAN gives fast block‑level storage that many servers can share. It helps backups, high availability, and storing large amounts of data.' },
+          hi: { q: 'क्लाउड में SAN क्यों उपयोगी है?', a: 'SAN तेज़ ब्लॉक‑लेवल स्टोरेज देता है जिसे कई सर्वर साझा कर सकते हैं। यह बैकअप, उच्च उपलब्धता और बड़े डेटा के लिए मददगार है।' },
+          mr: { q: 'क्लाउडमध्ये SAN का उपयोग का फायदा?', a: 'SAN जलद ब्लॉक‑लेवल स्टोरेज देते. अनेक सर्व्हर ते वापरू शकतात. बॅकअप, उच्च उपलब्धता व मोठ्या डेटासाठी उपयोगी.' }
+        },
+        {
+          en: { q: 'Benefits and use cases of IaaS (short).', a: 'Benefits: scale quickly, lower upfront cost, fast setup. Use cases: websites, dev/test, backups, big data jobs.' },
+          hi: { q: 'IaaS के लाभ और उपयोग (संक्षेप में).', a: 'लाभ: तेज़ स्केलिंग, कम शुरुआती खर्च, फास्ट सेटअप। उपयोग: वेबसाइट, डेवलप/टेस्ट, बैकअप, बिग‑डेटा।' },
+          mr: { q: 'IaaS चे फायदे व वापर (संक्षेप).', a: 'फायदे: जलद स्केलिंग, कमी सुरुवातीचा खर्च, वेगवान सेटअप. वापर: वेबसाइट, dev/test, बॅकअप, बिग‑डेटा.' }
+        }
+      ];
+
+      // working cards
+      const cards = rawCards;
+
+      // elements
+      const cardsGrid = document.getElementById('cardsGrid');
+      const langSelect = document.getElementById('langSelect');
+      const stopAllBtn = document.getElementById('stopAll');
+      const voicePrefBtn = document.getElementById('voicePref');
+      const voiceModal = document.getElementById('voiceModal');
+      const voiceList = document.getElementById('voiceList');
+      const closeVoiceModal = document.getElementById('closeVoiceModal');
+      const synth = window.speechSynthesis;
+
+      const localeMap = { en: 'en-IN', hi: 'hi-IN', mr: 'mr-IN' };
+
+      // localStorage key for chosen voice name by language
+      const VOICE_KEY = 'cf_voice_prefs_v1';
+
+      function getStoredVoicePrefs(){ try{ return JSON.parse(localStorage.getItem(VOICE_KEY) || '{}'); }catch(e){ return {}; } }
+      function setStoredVoicePref(lang, voiceName){ const s = getStoredVoicePrefs(); s[lang]=voiceName; localStorage.setItem(VOICE_KEY, JSON.stringify(s)); }
+
+      function escapeHtml(str){ return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+      function buildCards(lang){
+        cardsGrid.innerHTML = '';
+        cards.forEach((item, idx) => {
+          const data = item[lang] || item.en;
+
+          const col = document.createElement('div');
+          col.className = 'card-3d';
+
+          const card = document.createElement('div');
+          card.className = 'relative bg-white rounded-2xl shadow-lg overflow-hidden h-64 transform-gpu';
+          card.style.minHeight = '14rem';
+
+          const inner = document.createElement('div');
+          inner.className = 'card-inner relative w-full h-full';
+
+          const front = document.createElement('div');
+          front.className = 'card-face card-front flex flex-col justify-between';
+          front.innerHTML = `
+            <div class="flex items-start justify-between h-full">
+              <div class="p-3">
+                <div class="text-xs text-indigo-500 font-semibold">Q${idx+1}</div>
+                <div class="mt-2 text-base font-semibold text-slate-800">${escapeHtml(data.q)}</div>
+              </div>
+              <div class="flex flex-col items-end gap-3 p-3">
+                <button class="playBtn bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg shadow-sm focus-outline">🔊</button>
+                <button class="flipBtn bg-white border border-indigo-100 px-3 py-1 rounded-md text-sm">Flip</button>
+              </div>
+            </div>
+          `;
+
+          const back = document.createElement('div');
+          back.className = 'card-face card-back bg-gradient-to-br from-indigo-50 to-sky-50 flex flex-col justify-between';
+          back.innerHTML = `
+            <div class="p-3">
+              <div class="text-xs text-indigo-600 font-semibold">Answer</div>
+              <div class="mt-2 text-sm text-slate-800 card-scroll">${escapeHtml(data.a)}</div>
+            </div>
+            <div class="p-3 flex items-center justify-between">
+              <div class="text-xs text-slate-500">Tip: Read & listen twice.</div>
+              <div class="flex gap-2">
+                <button class="playBtn bg-emerald-100 text-emerald-700 px-3 py-2 rounded-lg shadow-sm focus-outline">🔊</button>
+                <button class="flipBtn bg-white border border-indigo-100 px-3 py-1 rounded-md text-sm">Flip</button>
+              </div>
+            </div>
+          `;
+
+          inner.appendChild(front);
+          inner.appendChild(back);
+          card.appendChild(inner);
+          col.appendChild(card);
+
+          // events
+          const flipButtons = col.querySelectorAll('.flipBtn');
+          flipButtons.forEach(btn => btn.addEventListener('click', (e)=>{ e.stopPropagation(); col.classList.toggle('is-flipped'); }));
+
+          card.addEventListener('click', (e)=>{ if(!e.target.closest('button')) col.classList.toggle('is-flipped'); });
+
+          const playButtons = col.querySelectorAll('.playBtn');
+          playButtons.forEach(pb => pb.addEventListener('click', (e)=>{ e.stopPropagation(); speakQnA(data.q, data.a, lang, col); }));
+
+          cardsGrid.appendChild(col);
+        });
+      }
+
+      // get voices helper
+      function loadVoices(){ return new Promise(resolve => {
+        let voices = synth.getVoices();
+        if(voices.length) return resolve(voices);
+        synth.onvoiceschanged = () => resolve(synth.getVoices());
+        // fallback: resolve after 1s
+        setTimeout(()=> resolve(synth.getVoices()), 1000);
+      }); }
+
+      // choose best voice with preference override
+      async function chooseVoiceForLang(lang){
+        const voices = await loadVoices();
+        if(!voices || !voices.length) return null;
+        const prefs = getStoredVoicePrefs();
+        if(prefs[lang]){
+          const chosen = voices.find(v=>v.name===prefs[lang]);
+          if(chosen) return chosen;
+        }
+        const locale = localeMap[lang] || 'en-IN';
+        // exact match
+        let v = voices.find(x=>x.lang && x.lang.toLowerCase()===locale.toLowerCase());
+        if(v) return v;
+        // startsWith
+        const prefix = locale.split('-')[0];
+        v = voices.find(x=>x.lang && x.lang.toLowerCase().startsWith(prefix));
+        if(v) return v;
+        // fallback: for Marathi try Hindi
+        if(prefix==='mr'){ v = voices.find(x=>x.lang && x.lang.toLowerCase().startsWith('hi')); if(v) return v; }
+        // prefer en-IN then any en
+        v = voices.find(x=>x.lang && x.lang.toLowerCase().startsWith('en-in')) || voices.find(x=>x.lang && x.lang.toLowerCase().startsWith('en'));
+        return v || voices[0];
+      }
+
+      // speak with chunking for reliability and softer tone
+      async function speakQnA(question, answer, lang, cardElement){
+        if(!('speechSynthesis' in window)){ alert('Speech synthesis not supported. Use Chrome or Edge.'); return; }
+        synth.cancel();
+
+        const voice = await chooseVoiceForLang(lang);
+        if(!voice){ alert('No available TTS voices on this browser. Try Chrome/Edge or install system voices.'); return; }
+
+        if(cardElement){ cardElement.classList.add('speaking'); }
+
+        // soft settings
+        const pitch = 0.9; // slightly lower for softer tone
+        const rate = (lang==='en')?0.95:0.9; // slower for hi/mr
+
+        // helper to speak text in smaller chunks (split by sentence)
+        function speakChunks(text, onComplete){
+          const sentences = text.split(/(?<=[.!?।])/g).map(s=>s.trim()).filter(Boolean);
+          let i=0;
+          function next(){
+            if(i>=sentences.length){ onComplete(); return; }
+            const u = new SpeechSynthesisUtterance(sentences[i]);
+            u.voice = voice; u.lang = voice.lang || localeMap[lang]; u.rate = rate; u.pitch = pitch;
+            u.onend = ()=>{ i++; setTimeout(next, 200); };
+            synth.speak(u);
+          }
+          next();
+        }
+
+        // speak question then answer
+        speakChunks(question, ()=>{ setTimeout(()=> speakChunks(answer, ()=>{ if(cardElement) cardElement.classList.remove('speaking'); }), 220); });
+      }
+
+      // voice modal
+      voicePrefBtn.addEventListener('click', async ()=>{
+        voiceModal.classList.remove('hidden');
+        voiceList.innerHTML = '<div class="text-sm text-gray-500">Loading voices…</div>';
+        const voices = await loadVoices();
+        if(!voices || voices.length===0){ voiceList.innerHTML = '<div class="text-sm text-red-500">No voices found in this browser.</div>'; return; }
+        const prefs = getStoredVoicePrefs();
+        voiceList.innerHTML = '';
+        const languages = ['en','hi','mr'];
+        languages.forEach(lang =>{
+          const heading = document.createElement('div');
+          heading.className = 'font-semibold mt-3';
+          heading.textContent = (lang==='en')? 'English' : (lang==='hi')? 'हिन्दी' : 'मराठी';
+          voiceList.appendChild(heading);
+
+          voices.forEach(v=>{
+            const row = document.createElement('div');
+            row.className = 'flex items-center justify-between p-1';
+            const label = document.createElement('div');
+            label.className = 'text-sm';
+            label.innerHTML = `<div class="font-medium">${v.name}</div><div class="text-xs text-gray-500">${v.lang}</div>`;
+            const btn = document.createElement('button');
+            btn.className = 'px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-sm';
+            btn.textContent = (prefs[lang]===v.name)? 'Selected' : 'Select';
+            btn.addEventListener('click', ()=>{ setStoredVoicePref(lang, v.name); btn.textContent = 'Selected'; });
+            row.appendChild(label);
+            row.appendChild(btn);
+            voiceList.appendChild(row);
+          });
+        });
+      });
+
+      closeVoiceModal.addEventListener('click', ()=> voiceModal.classList.add('hidden'));
+
+      // initial build
+      buildCards('en');
+
+      // language change
+      langSelect.addEventListener('change', (e)=> buildCards(e.target.value));
+
+      // stop all
+      stopAllBtn.addEventListener('click', ()=>{ synth.cancel(); document.querySelectorAll('.speaking').forEach(el=>el.classList.remove('speaking')); });
+
+      // expose for debug
+      window._flashcards = cards;
+    </script>
+  </body>
+</html>
